@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pájaro - Phase 1</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
     <style>
         /* Style the body to have a dark blue background */
         body {
@@ -753,6 +755,17 @@
                 }
             }
         });
+// Listen for touch input - for iPhone/iPad
+window.addEventListener('touchstart', function(event) {
+    if (!gameStarted && !gameOver) {
+        gameStarted = true;
+    } else if (gameStarted && !gameOver) {
+        bird.velocity = JUMP_STRENGTH;
+        wingFlap = 1;
+        playBeep();
+    }
+    event.preventDefault(); // Stops the screen from bouncing or zooming
+}, { passive: false });
 
         // Listen for mouse clicks - when clicked, restart the game if it's over
         canvas.addEventListener('click', function() {
