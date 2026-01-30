@@ -38,11 +38,14 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // Audio context for generating sounds (Web Audio API)
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const bgMusic = new Audio('pajaro_slowed_v2.mp3');
+// Setup both music tracks
+const bgMusic = new Audio('pajaro_slowed_v2.mp3');
+const fastMusic = new Audio('pajaro_fast.mp3'); 
+
 bgMusic.loop = true;
+fastMusic.loop = true;
 bgMusic.volume = 0.4;
+fastMusic.volume = 0.4;
         // Function to generate a beep sound (high-pitched for flapping)
         function playBeep() {
             const oscillator = audioContext.createOscillator();
@@ -411,6 +414,11 @@ bgMusic.volume = 0.4;
                 // Check if bird passed this pillar (for scoring)
                 if (!pillars[i].scored && pillars[i].x + PILLAR_WIDTH < bird.x) {
                     score++;                    // Increase score
+                    if (score === 10) {
+            bgMusic.pause();
+            bgMusic.currentTime = 0;
+            fastMusic.play().catch(e => console.log("Audio waiting for interaction"));
+        }
                     pillars[i].scored = true;   // Mark this pillar as scored
                 }
 
@@ -731,6 +739,11 @@ bgMusic.volume = 0.4;
             invincibleTimer = 0; // Reset timer
             wingFlap = 0;        // Reset wing animation
             pillarSpeed = BASE_PILLAR_SPEED;  // Reset pillar speed
+            // Reset music to the slow Cumbia
+    fastMusic.pause();
+    fastMusic.currentTime = 0;
+    bgMusic.currentTime = 0; 
+    bgMusic.play();
             pillars = [];        // Clear all pillars
             trailParticles = []; // Clear trail particles
             newHighScore = false; // Reset high score flag
