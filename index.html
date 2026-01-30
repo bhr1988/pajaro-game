@@ -40,7 +40,9 @@
 
         // Audio context for generating sounds (Web Audio API)
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-
+        const bgMusic = new Audio('pajaro_slowed_v2.mp3');
+bgMusic.loop = true;
+bgMusic.volume = 0.4;
         // Function to generate a beep sound (high-pitched for flapping)
         function playBeep() {
             const oscillator = audioContext.createOscillator();
@@ -756,16 +758,24 @@
                 }
             }
         });
-// Listen for touch input - for iPhone/iPad
+/// Updated Touch Listener for iOS Audio Fix
 window.addEventListener('touchstart', function(event) {
     if (!gameStarted && !gameOver) {
         gameStarted = true;
+        // This is the "Magic Key" for iOS - it unlocks audio on the first tap
+        bgMusic.play().catch(e => console.log("Audio waiting for interaction"));
     } else if (gameStarted && !gameOver) {
         bird.velocity = JUMP_STRENGTH;
         wingFlap = 1;
-        playBeep();
+        // If you have a jump sound effect, play it here too
     }
-    event.preventDefault(); // Stops the screen from bouncing or zooming
+    
+    if (gameOver) {
+        // This allows the tap to restart the game
+        // (Assuming your restart logic is triggered by the canvas click)
+    }
+
+    event.preventDefault(); 
 }, { passive: false });
 
         // Listen for mouse clicks - when clicked, restart the game if it's over
