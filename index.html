@@ -4,858 +4,448 @@
     <meta charset="UTF-8">
     <title>Pájaro - Phase 1</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <style>
-        /* Style the body to have a dark blue background */
         body {
             margin: 0;
             padding: 0;
-            background-color: #1a237e; /* Dark blue background */
+            background-color: #1a237e;
             display: flex;
             justify-content: center;
             align-items: center;
             min-height: 100vh;
             font-family: Arial, sans-serif;
+            overflow: hidden;
         }
-
-        /* Style the canvas container */
         #gameCanvas {
             border: 2px solid #3f51b5;
-            background-color: #283593; /* Slightly lighter blue for the game area */
+            background-color: #283593;
             display: block;
-            max-width: 95vw; /*<----New */
-            height: auto; /*<----New */
+            max-width: 95vw;
+            height: auto;
         }
     </style>
 </head>
 <body>
-    <!-- The canvas element where we'll draw our game -->
     <canvas id="gameCanvas" width="800" height="600"></canvas>
 
     <script>
-        // Get the canvas element and its drawing context
-        // The context is like a paintbrush we use to draw on the canvas
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-// Setup both music tracks
-const bgMusic = new Audio('pajaro_slowed_v2.mp3');
-const fastMusic = new Audio('pajaro_fast.mp3'); 
+        // --- AUDIO SETUP ---
+        // Added the missing audioContext that was causing the crash
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
-bgMusic.loop = true;
-fastMusic.loop = true;
-bgMusic.volume = 0.4;
-fastMusic.volume = 0.4;
-        // Function to generate a beep sound (high-pitched for flapping)
+        const bgMusic = new Audio('pajaro_slowed_v2.mp3');
+        const fastMusic = new Audio('pajaro_fast.mp3'); 
+
+        bgMusic.loop = true;
+        fastMusic.loop = true;
+        bgMusic.volume = 0.4;
+        fastMusic.volume = 0.4;
+
         function playBeep() {
             const oscillator = audioContext.createOscillator();
             const gainNode = audioContext.createGain();
-
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
-
-            oscillator.frequency.value = 600;  // High-pitched frequency (600 Hz)
-            oscillator.type = 'sine';          // Smooth sine wave
-
+            oscillator.frequency.value = 600;
+            oscillator.type = 'sine';
             gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
             gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
-
             oscillator.start(audioContext.currentTime);
             oscillator.stop(audioContext.currentTime + 0.1);
         }
 
-        // Function to generate a buzz sound (low-pitched for hitting pipe)
         function playBuzz() {
             const oscillator = audioContext.createOscillator();
             const gainNode = audioContext.createGain();
-
             oscillator.connect(gainNode);
             gainNode.connect(audioContext.destination);
-
-            oscillator.frequency.value = 150;  // Low-pitched frequency (150 Hz)
-            oscillator.type = 'sawtooth';      // Buzzy sawtooth wave
-
+            oscillator.frequency.value = 150;
+            oscillator.type = 'sawtooth';
             gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
             gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-
             oscillator.start(audioContext.currentTime);
             oscillator.stop(audioContext.currentTime + 0.3);
         }
 
-        // High Score Management using localStorage
+        // --- GAME STATE ---
         const HIGH_SCORE_KEY = 'pajaro_high_score';
-
-        // Function to get high score from localStorage
         function getHighScore() {
             const saved = localStorage.getItem(HIGH_SCORE_KEY);
             return saved ? parseInt(saved, 10) : 0;
         }
-
-        // Function to save high score to localStorage
         function saveHighScore(newScore) {
             localStorage.setItem(HIGH_SCORE_KEY, newScore.toString());
         }
 
-        // Game state - keeps track of whether the game is running or over
         let gameOver = false;
-        let gameStarted = false;    // Is the game started? (paused at start)
-        let score = 0;              // Player's score
-        let hearts = 5;             // Number of lives (hearts)
-        let invincible = false;     // Is the bird currently invincible?
-        let invincibleTimer = 0;    // Timer for invincibility (in frames)
-        let wingFlap = 0;           // Wing animation state (0 = up, 1 = down)
-        let highScore = getHighScore();  // Get saved high score
-        let newHighScore = false;   // Did we achieve a new high score?
-        let flashTimer = 0;         // Timer for high score flashing effect
+        let gameStarted = false;
+        let score = 0;
+        let hearts = 5;
+        let invincible = false;
+        let invincibleTimer = 0;
+        let wingFlap = 0;
+        let highScore = getHighScore();
+        let newHighScore = false;
+        let flashTimer = 0;
 
-        // Bird object - stores all the information about our bird
         const bird = {
-            x: 100,              // Horizontal position (left to right)
-            y: 200,              // Vertical position (top to bottom)
-            radius: 35,          // Size of the bird (circle radius)
-            velocity: 0,          // How fast the bird is moving up or down
-            color: '#39FF14',    // Neon green color for the bird
-            rotation: 0           // Rotation angle for visual tilt
+            x: 100,
+            y: 200,
+            radius: 35,
+            velocity: 0,
+            color: '#39FF14',
+            rotation: 0
         };
 
-        // Particle trail system
-        const TRAIL_LENGTH = 5;           // Number of particles in trail
-        let trailParticles = [];          // Array to store trail particles
+        let trailParticles = [];
+        const TRAIL_LENGTH = 5;
+        const GRAVITY = 0.15;
+        const JUMP_STRENGTH = -5;
+        const BASE_PILLAR_SPEED = 2;
+        const PILLAR_WIDTH = 80;
+        const PILLAR_GAP = 200;
+        let pillarSpeed = BASE_PILLAR_SPEED;
+        const PILLAR_SPACING = 700;
+        const CLOUD_COUNT = 5;
+        const CLOUD_SPEED = 0.3;
 
-        // Function to add a trail particle at bird's position
-        function addTrailParticle() {
-            trailParticles.push({
-                x: bird.x,                    // X position (where bird was)
-                y: bird.y,                    // Y position (where bird was)
-                opacity: 0.8,                 // Starting opacity (fades out)
-                size: 8                       // Size of particle
-            });
-
-            // Keep only the last 5 particles
-            if (trailParticles.length > TRAIL_LENGTH) {
-                trailParticles.shift();  // Remove oldest particle
-            }
-        }
-
-        // Function to update and draw trail particles
-        function updateTrail() {
-            // Add new particle every few frames
-            if (Math.floor(Date.now() / 50) % 2 === 0) {
-                addTrailParticle();
-            }
-
-            // Update all particles (fade and shrink them)
-            for (let i = trailParticles.length - 1; i >= 0; i--) {
-                const particle = trailParticles[i];
-                particle.opacity -= 0.15;  // Fade out
-                particle.size -= 0.3;       // Shrink
-
-                // Remove particles that are fully faded
-                if (particle.opacity <= 0 || particle.size <= 0) {
-                    trailParticles.splice(i, 1);
-                }
-            }
-        }
-
-        // Function to draw trail particles
-        function drawTrail() {
-            for (let i = 0; i < trailParticles.length; i++) {
-                const particle = trailParticles[i];
-
-                ctx.beginPath();
-                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(57, 255, 20, ${particle.opacity})`;  // Fading green
-                ctx.fill();
-                ctx.closePath();
-            }
-        }
-
-        // Physics constants
-        const GRAVITY = 0.15;     // How strong gravity is (slower fall)
-        const JUMP_STRENGTH = -5; // How much the bird jumps when spacebar is pressed (negative = upward)
-        const BASE_PILLAR_SPEED = 2;  // Starting speed of pillars
-
-        // Pillar (pipe) constants
-        const PILLAR_WIDTH = 80;          // How wide each pillar is
-        const PILLAR_GAP = 200;           // Size of the gap between top and bottom pillars
-        let pillarSpeed = BASE_PILLAR_SPEED;  // Current speed of pillars (increases with score)
-        const PILLAR_SPACING = 700;       // Distance between each set of pillars (doubled)
-
-        // Cloud constants for parallax background
-        const CLOUD_COUNT = 5;            // Number of clouds
-        const CLOUD_SPEED = 0.3;          // How fast clouds move (much slower than pillars)
-
-        // Array to store all the pillars (pipes)
         let pillars = [];
-
-        // Array to store clouds for parallax background
         let clouds = [];
-
-        // Array to store background trees for jungle effect
         let backgroundTrees = [];
-        const BACKGROUND_TREE_COUNT = 8;  // Number of background trees
+        const BACKGROUND_TREE_COUNT = 8;
 
-        // Function to create background trees
+        // --- INITIALIZATION FUNCTIONS ---
         function createBackgroundTrees() {
             backgroundTrees = [];
             for (let i = 0; i < BACKGROUND_TREE_COUNT; i++) {
                 backgroundTrees.push({
-                    x: Math.random() * canvas.width * 2,  // Spread across wider area
-                    y: canvas.height,                     // Start at bottom
-                    trunkWidth: 20 + Math.random() * 15,  // Random trunk width (20-35)
-                    trunkHeight: 100 + Math.random() * 150, // Random trunk height (100-250)
-                    treeWidth: 60 + Math.random() * 80    // Random tree width (60-140)
+                    x: Math.random() * canvas.width * 2,
+                    y: canvas.height,
+                    trunkWidth: 20 + Math.random() * 15,
+                    trunkHeight: 100 + Math.random() * 150,
+                    treeWidth: 60 + Math.random() * 80
                 });
             }
         }
 
-        // Function to draw background trees
-        function drawBackgroundTrees() {
-            for (let i = 0; i < backgroundTrees.length; i++) {
-                const tree = backgroundTrees[i];
-
-                // Draw trunk (rectangle)
-                ctx.fillStyle = 'rgba(101, 67, 33, 0.6)';  // Semi-transparent brown
-                ctx.fillRect(
-                    tree.x - tree.trunkWidth / 2,  // X position (centered)
-                    tree.y - tree.trunkHeight,     // Y position (from bottom up)
-                    tree.trunkWidth,               // Width
-                    tree.trunkHeight               // Height
-                );
-
-                // Draw triangular tree top
-                ctx.fillStyle = 'rgba(34, 139, 34, 0.5)';  // Semi-transparent dark green
-                ctx.beginPath();
-                ctx.moveTo(tree.x, tree.y - tree.trunkHeight);  // Top point
-                ctx.lineTo(tree.x - tree.treeWidth / 2, tree.y - tree.trunkHeight + tree.treeWidth / 2);  // Bottom left
-                ctx.lineTo(tree.x + tree.treeWidth / 2, tree.y - tree.trunkHeight + tree.treeWidth / 2);  // Bottom right
-                ctx.closePath();
-                ctx.fill();
-            }
-        }
-
-        // Function to update background tree positions (parallax scrolling)
-        function updateBackgroundTrees() {
-            // Only update if game has started
-            if (!gameStarted) return;
-
-            for (let i = 0; i < backgroundTrees.length; i++) {
-                backgroundTrees[i].x -= CLOUD_SPEED * 0.5;  // Move slower than pillars
-
-                // If tree moves off left side, wrap it to the right
-                if (backgroundTrees[i].x + backgroundTrees[i].treeWidth / 2 < 0) {
-                    backgroundTrees[i].x = canvas.width + backgroundTrees[i].treeWidth / 2;
-                }
-            }
-        }
-
-        // Function to draw the gradient sky (desert sunset)
-        function drawSky() {
-            // Create a vertical gradient from deep orange (bottom) to dark purple (top)
-            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-            gradient.addColorStop(0, '#4a148c');      // Dark purple at top
-            gradient.addColorStop(0.5, '#6a1b9a');    // Medium purple in middle
-            gradient.addColorStop(1, '#ff6f00');      // Deep orange at bottom
-
-            // Fill the entire canvas with the gradient
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-
-        // Function to create clouds at random positions
         function createClouds() {
             clouds = [];
             for (let i = 0; i < CLOUD_COUNT; i++) {
                 clouds.push({
-                    x: Math.random() * canvas.width,     // Random X position
-                    y: Math.random() * canvas.height * 0.7,  // Random Y in upper 70% of screen
-                    width: 80 + Math.random() * 60,      // Random width (80-140)
-                    height: 40 + Math.random() * 30   // Random height (40-70)
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height * 0.7,
+                    width: 80 + Math.random() * 60,
+                    height: 40 + Math.random() * 30
                 });
             }
         }
 
-        // Function to draw clouds (parallax background)
+        function createPillar() {
+            const minGapY = PILLAR_GAP / 2 + 50;
+            const maxGapY = canvas.height - PILLAR_GAP / 2 - 50;
+            const gapY = Math.random() * (maxGapY - minGapY) + minGapY;
+            pillars.push({
+                x: canvas.width,
+                gapY: gapY,
+                scored: false
+            });
+        }
+
+        // --- DRAWING FUNCTIONS ---
+        function drawSky() {
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#4a148c');
+            gradient.addColorStop(0.5, '#6a1b9a');
+            gradient.addColorStop(1, '#ff6f00');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function drawBackgroundTrees() {
+            backgroundTrees.forEach(tree => {
+                ctx.fillStyle = 'rgba(101, 67, 33, 0.6)';
+                ctx.fillRect(tree.x - tree.trunkWidth / 2, tree.y - tree.trunkHeight, tree.trunkWidth, tree.trunkHeight);
+                ctx.fillStyle = 'rgba(34, 139, 34, 0.5)';
+                ctx.beginPath();
+                ctx.moveTo(tree.x, tree.y - tree.trunkHeight);
+                ctx.lineTo(tree.x - tree.treeWidth / 2, tree.y - tree.trunkHeight + tree.treeWidth / 2);
+                ctx.lineTo(tree.x + tree.treeWidth / 2, tree.y - tree.trunkHeight + tree.treeWidth / 2);
+                ctx.fill();
+            });
+        }
+
         function drawClouds() {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';  // Semi-transparent white
-
-            // Loop through all clouds and draw each one as an oval
-            for (let i = 0; i < clouds.length; i++) {
-                const cloud = clouds[i];
-
-                // Draw oval by drawing an ellipse
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            clouds.forEach(cloud => {
                 ctx.beginPath();
                 ctx.ellipse(cloud.x, cloud.y, cloud.width / 2, cloud.height / 2, 0, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.closePath();
-            }
+            });
         }
 
-        // Function to update cloud positions (parallax scrolling)
-        function updateClouds() {
-            // Only update clouds if game has started
-            if (!gameStarted) return;
-
-            for (let i = 0; i < clouds.length; i++) {
-                clouds[i].x -= CLOUD_SPEED;  // Move cloud slowly to the left
-
-                // If cloud moves off left side, wrap it to the right
-                if (clouds[i].x + clouds[i].width / 2 < 0) {
-                    clouds[i].x = canvas.width + clouds[i].width / 2;
-                    clouds[i].y = Math.random() * canvas.height * 0.7;  // New random Y
-                }
-            }
-        }
-
-        // Function to calculate current pillar speed based on score (difficulty curve)
-        function calculatePillarSpeed() {
-            // Increase speed by 10% for every 5 points
-            const speedMultiplier = 1 + (Math.floor(score / 5) * 0.1);
-            return BASE_PILLAR_SPEED * speedMultiplier;
-        }
-
-        // Function to create a new pillar starting from the right side
-        function createPillar() {
-            // Random gap position (center of the gap) - keeps it within playable area
-            const minGapY = PILLAR_GAP / 2 + 50;  // Minimum gap center position
-            const maxGapY = canvas.height - PILLAR_GAP / 2 - 50;  // Maximum gap center position
-            const gapY = Math.random() * (maxGapY - minGapY) + minGapY;
-
-            // Create a pillar object with top and bottom rectangles
-            const pillar = {
-                x: canvas.width,                    // Start from the right edge
-                gapY: gapY,                         // Center Y position of the gap
-                scored: false                       // Track if we've already given points for passing this pillar
-            };
-
-            pillars.push(pillar);  // Add the new pillar to our array
-        }
-
-        // Function to draw all pillars (now as trees and branches)
         function drawPillars() {
-            // Loop through all pillars and draw each one
-            for (let i = 0; i < pillars.length; i++) {
-                const pillar = pillars[i];
-
-                // Calculate dimensions for top and bottom parts
-                const gapTop = pillar.gapY - PILLAR_GAP / 2;  // Top of gap
-                const gapBottom = pillar.gapY + PILLAR_GAP / 2;  // Bottom of gap
-                const topHeight = gapTop;  // Height of top branch
-                const bottomHeight = canvas.height - gapBottom;  // Height of bottom tree trunk
-
-                // Draw bottom tree: trunk (rectangle) and triangular top
-                ctx.fillStyle = '#654321';  // Brown trunk color
-                const trunkX = pillar.x + PILLAR_WIDTH / 2;  // Center of pillar
-                const trunkWidth = PILLAR_WIDTH * 0.6;  // Trunk slightly narrower than pillar width
+            pillars.forEach(pillar => {
+                const gapBottom = pillar.gapY + PILLAR_GAP / 2;
+                const trunkX = pillar.x + PILLAR_WIDTH / 2;
+                const trunkWidth = PILLAR_WIDTH * 0.6;
                 
-                // Draw tree trunk (from gap bottom to canvas bottom)
-                ctx.fillRect(
-                    trunkX - trunkWidth / 2,  // X position (centered)
-                    gapBottom,                // Y position (starts at gap bottom)
-                    trunkWidth,               // Width
-                    bottomHeight              // Height (to bottom)
-                );
+                ctx.fillStyle = '#654321';
+                ctx.fillRect(trunkX - trunkWidth / 2, gapBottom, trunkWidth, canvas.height - gapBottom);
 
-                // Draw triangular tree top (above the trunk)
-                const treeTopY = gapBottom;  // Top of triangle at gap bottom
-                const treeTopHeight = Math.min(bottomHeight * 0.4, 60);  // Triangle height (up to 40% of trunk or 60px)
-                ctx.fillStyle = '#2d5016';  // Dark green tree top
+                const treeTopY = gapBottom;
+                const treeTopHeight = Math.min((canvas.height - gapBottom) * 0.4, 60);
+                ctx.fillStyle = '#2d5016';
                 ctx.beginPath();
-                ctx.moveTo(trunkX, treeTopY - treeTopHeight);  // Top point of triangle
-                ctx.lineTo(pillar.x, treeTopY);  // Bottom left
-                ctx.lineTo(pillar.x + PILLAR_WIDTH, treeTopY);  // Bottom right
-                ctx.closePath();
+                ctx.moveTo(trunkX, treeTopY - treeTopHeight);
+                ctx.lineTo(pillar.x, treeTopY);
+                ctx.lineTo(pillar.x + PILLAR_WIDTH, treeTopY);
                 ctx.fill();
 
-                // Draw top branch: hanging down from top with branches
-                ctx.fillStyle = '#3d6b1f';  // Dark green for branches
-                
-                // Main branch trunk (vertical rectangle from top)
-                const branchTrunkHeight = Math.min(topHeight * 0.7, 40);  // Main trunk height
-                ctx.fillRect(
-                    trunkX - trunkWidth / 2,  // X position (centered)
-                    0,                        // Y position (start at top)
-                    trunkWidth,               // Width
-                    branchTrunkHeight         // Height
-                );
+                ctx.fillStyle = '#3d6b1f';
+                const topHeight = pillar.gapY - PILLAR_GAP / 2;
+                const branchTrunkHeight = Math.min(topHeight * 0.7, 40);
+                ctx.fillRect(trunkX - trunkWidth / 2, 0, trunkWidth, branchTrunkHeight);
+            });
+        }
 
-                // Draw hanging branches (small rectangles hanging down)
-                const branchCount = 3;  // Number of hanging branch segments
-                const branchSpacing = (topHeight - branchTrunkHeight) / (branchCount + 1);
-                
-                for (let j = 1; j <= branchCount; j++) {
-                    const branchY = branchTrunkHeight + branchSpacing * j;
-                    const branchWidth = trunkWidth + (j % 2 === 0 ? 10 : -5);  // Alternating widths
-                    const branchLength = 20 + j * 8;  // Longer branches further down
-                    
-                    // Each branch hangs down like a limb
-                    ctx.fillRect(
-                        trunkX - branchWidth / 2,
-                        branchY,
-                        branchWidth,
-                        branchLength
-                    );
-                }
+        function drawBird() {
+            bird.rotation = Math.max(-0.5, Math.min(0.5, bird.velocity / 10));
+            if (!invincible || Math.floor(invincibleTimer / 5) % 2 === 0) {
+                ctx.save();
+                ctx.translate(bird.x, bird.y);
+                ctx.rotate(bird.rotation);
+                ctx.fillStyle = '#DC143C';
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 30, 14, 0, 0, Math.PI * 2);
+                ctx.fill();
+                const wingAngle = Math.sin(Date.now() * 0.01) * 0.4;
+                ctx.fillStyle = '#FFD700';
+                ctx.save();
+                ctx.translate(0, -8);
+                ctx.rotate(wingAngle);
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 15, 12, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(18, -6, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(20, -6, 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#808080';
+                ctx.beginPath();
+                ctx.moveTo(30, 0); ctx.lineTo(25, -4); ctx.lineTo(25, 4);
+                ctx.fill();
+                ctx.restore();
             }
         }
 
-        // Function to update pillar positions and check for scoring
-        function updatePillars() {
-            // Only update pillars if game has started
-            if (!gameStarted) return;
-
-            // Update pillar speed based on score (difficulty curve)
-            pillarSpeed = calculatePillarSpeed();
-
-            // Move all pillars from right to left
-            for (let i = pillars.length - 1; i >= 0; i--) {
-                pillars[i].x -= pillarSpeed;  // Move pillar left using current speed
-
-                // Check if bird passed this pillar (for scoring)
-                if (!pillars[i].scored && pillars[i].x + PILLAR_WIDTH < bird.x) {
-                    score++;                    // Increase score
-                    if (score === 10) {
-            bgMusic.pause();
-            bgMusic.currentTime = 0;
-            fastMusic.play().catch(e => console.log("Audio waiting for interaction"));
-        }
-                    pillars[i].scored = true;   // Mark this pillar as scored
-                }
-
-                // Remove pillars that have moved off the left side
-                if (pillars[i].x + PILLAR_WIDTH < 0) {
-                    pillars.splice(i, 1);  // Delete the pillar from the array
-                }
-            }
-
-            // Create new pillars when needed - if last pillar is far enough left
-            if (pillars.length === 0 || pillars[pillars.length - 1].x < canvas.width - PILLAR_SPACING) {
-                createPillar();  // Add a new pillar from the right
-            }
+        function drawTrail() {
+            trailParticles.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(57, 255, 20, ${p.opacity})`;
+                ctx.fill();
+            });
         }
 
-        // Function to check collision with pillars (with hearts system)
-        function checkPillarCollision() {
-            // Don't check collision if bird is invincible or game hasn't started
-            if (invincible || !gameStarted) {
-                return;
-            }
-
-            for (let i = 0; i < pillars.length; i++) {
-                const pillar = pillars[i];
-
-                // Check if bird's X position overlaps with pillar's X position
-                if (bird.x + bird.radius > pillar.x && bird.x - bird.radius < pillar.x + PILLAR_WIDTH) {
-                    // Check if bird's Y position is outside the gap
-                    const gapTop = pillar.gapY - PILLAR_GAP / 2;
-                    const gapBottom = pillar.gapY + PILLAR_GAP / 2;
-
-                    // If bird hits top or bottom pillar, lose a heart!
-                    if (bird.y - bird.radius < gapTop || bird.y + bird.radius > gapBottom) {
-                        hearts--;                    // Lose one heart
-                        invincible = true;           // Make bird invincible
-                        invincibleTimer = 120;       // 2 seconds of invincibility (60 fps * 2 = 120 frames)
-                        playBuzz();                  // Play buzz sound when hitting pipe
-
-                        // If no hearts left, game over!
-                        if (hearts <= 0) {
-                            endGame();
-                        }
-                        return;  // Exit the function
-                    }
-                }
-            }
-        }
-
-        // Function to end the game and check for high score
-        function endGame() {
-            gameOver = true;
-            gameStarted = false;  // Stop game updates
-
-            // Check if this is a new high score
-            if (score > highScore) {
-                highScore = score;  // Update high score
-                saveHighScore(highScore);  // Save to localStorage
-                newHighScore = true;  // Flag for special effect
-            } else {
-                newHighScore = false;
-            }
-        }
-
-        // Function to update invincibility timer and flicker effect
-        function updateInvincibility() {
-            if (invincible) {
-                invincibleTimer--;  // Count down the timer
-
-                // If timer reaches zero, invincibility ends
-                if (invincibleTimer <= 0) {
-                    invincible = false;
-                }
-            }
-        }
-
-        // Function to update wing flap animation
-        function updateWingFlap() {
-            // Animate wing back to normal position after flapping
-            if (wingFlap > 0) {
-                wingFlap -= 0.2;  // Gradually return to 0
-                if (wingFlap < 0) wingFlap = 0;
-            }
-        }
-
-        // Function to update high score flash effect
-        function updateFlashEffect() {
-            if (newHighScore) {
-                flashTimer++;  // Increment flash timer for color cycling
-            }
-        }
-
-        // Function to get rainbow color for high score text
-        function getRainbowColor() {
-            const hue = (flashTimer * 5) % 360;  // Cycle through hue values
-            return `hsl(${hue}, 100%, 50%)`;
-        }
-
-        // Function to draw hearts in the top-left corner
         function drawHearts() {
-            ctx.fillStyle = '#ff1744';  // Red color for hearts
+            ctx.fillStyle = '#ff1744';
             ctx.font = '32px Arial';
-
-            // Draw heart symbol (♥) for each remaining heart
+            ctx.textAlign = 'left';
             for (let i = 0; i < hearts; i++) {
                 ctx.fillText('♥', 20 + (i * 35), 40);
             }
         }
 
-        // Function to draw the score in the top-right corner
         function drawScore() {
-            ctx.fillStyle = 'white';              // White text color
-            ctx.font = '36px Arial';              // Big, readable font
-            ctx.textAlign = 'right';              // Align text to the right
+            ctx.fillStyle = 'white';
+            ctx.font = '36px Arial';
+            ctx.textAlign = 'right';
             ctx.fillText('Score: ' + score, canvas.width - 20, 40);
         }
 
-        // Function to draw the start screen
         function drawStartScreen() {
-            // Draw semi-transparent overlay
             ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-
             ctx.fillStyle = 'white';
             ctx.font = '48px Arial';
             ctx.textAlign = 'center';
-            ctx.fillText('Press Space to Start', canvas.width / 2, canvas.height / 2);
+            ctx.fillText('Tap to Start', canvas.width / 2, canvas.height / 2);
         }
 
-        // Function to draw the bird on the canvas (Colombian Macaw - construction paper style)
-        function drawBird() {
-            // Calculate bird rotation based on velocity (tilt up when jumping, down when falling)
-            // Limit rotation to a reasonable range (-30 to 30 degrees)
-            bird.rotation = Math.max(-0.5, Math.min(0.5, bird.velocity / 10));
-
-            // Only draw bird if not flickering (invincibility effect)
-            // Flicker by drawing only on odd frame counts
-            if (!invincible || Math.floor(invincibleTimer / 5) % 2 === 0) {
-                ctx.save();  // Save the current canvas state
-
-                // Move origin to bird's center for rotation
-                ctx.translate(bird.x, bird.y);
-                ctx.rotate(bird.rotation);  // Rotate the canvas
-
-                // Draw Colombian Macaw using simple geometric shapes
-                // All coordinates are relative to center (0, 0) after translation
-
-                // 1. Body: Large red horizontal oval (30% narrower - sleek and aerodynamic)
-                ctx.fillStyle = '#DC143C';  // Red (Crimson)
-                ctx.beginPath();
-                ctx.ellipse(0, 0, 30, 14, 0, 0, Math.PI * 2);  // Horizontal oval: 30px wide, 14px tall (20 * 0.7)
-                ctx.fill();
-                ctx.closePath();
-
-                // 2. Wing: Yellow oval with blue tip, animated with sine wave for flapping
-                // Calculate wing flap angle using sine wave based on game time
-                const wingAngle = Math.sin(Date.now() * 0.01) * 0.4;  // Rotate wing up/down with sine wave
-                
-                // Draw yellow wing with rotation
-                ctx.fillStyle = '#FFD700';  // Yellow (Gold)
-                ctx.save();  // Save state for wing rotation
-                ctx.translate(0, -8);  // Move to wing position
-                ctx.rotate(wingAngle);  // Rotate wing based on sine wave
-                ctx.beginPath();
-                ctx.ellipse(0, 0, 15, 12, 0, 0, Math.PI * 2);  // Yellow wing oval
-                ctx.fill();
-                ctx.closePath();
-
-                // Blue tip on wing (small blue oval on the side)
-                ctx.fillStyle = '#0066CC';  // Blue
-                ctx.beginPath();
-                ctx.ellipse(-10, 0, 8, 6, 0, 0, Math.PI * 2);  // Blue tip on left side of wing
-                ctx.fill();
-                ctx.closePath();
-                ctx.restore();  // Restore state after wing rotation
-
-                // 3. Face: White circle for eye patch near the front
-                ctx.fillStyle = 'white';
-                ctx.beginPath();
-                ctx.arc(18, -6, 8, 0, Math.PI * 2);  // White eye patch circle (front right side)
-                ctx.fill();
-                ctx.closePath();
-
-                // Tiny black dot for pupil inside eye patch (smaller for focused look)
-                ctx.fillStyle = 'black';
-                ctx.beginPath();
-                ctx.arc(20, -6, 2, 0, Math.PI * 2);  // Black pupil (smaller: 2px radius instead of 3px)
-                ctx.fill();
-                ctx.closePath();
-
-                // 4. Beak: Small grey triangle at the very front
-                ctx.fillStyle = '#808080';  // Grey
-                ctx.beginPath();
-                ctx.moveTo(30, 0);      // Front tip of beak
-                ctx.lineTo(25, -4);     // Top of beak
-                ctx.lineTo(25, 4);      // Bottom of beak
-                ctx.closePath();
-                ctx.fill();
-
-                // 5. Tail: Red triangle sticking out the back
-                ctx.fillStyle = '#DC143C';  // Red (matching body)
-                ctx.beginPath();
-                ctx.moveTo(-30, 0);     // Back center of body (tail start)
-                ctx.lineTo(-45, -10);   // Top point of tail triangle
-                ctx.lineTo(-45, 10);    // Bottom point of tail triangle
-                ctx.closePath();
-                ctx.fill();
-
-                // 6. Bird Feet: Two small grey lines representing zygodactyl feet (two toes forward, two back)
-                ctx.strokeStyle = '#808080';  // Grey for feet
-                ctx.lineWidth = 2;  // Thin lines
-                // Left foot (two toes)
-                ctx.beginPath();
-                ctx.moveTo(-5, 14);   // Bottom of body, left side
-                ctx.lineTo(-8, 18);   // Left toe (forward)
-                ctx.moveTo(-5, 14);   // Back to foot base
-                ctx.lineTo(-10, 18);  // Left toe (back)
-                ctx.stroke();
-                ctx.closePath();
-                
-                // Right foot (two toes)
-                ctx.beginPath();
-                ctx.moveTo(5, 14);    // Bottom of body, right side
-                ctx.lineTo(8, 18);    // Right toe (forward)
-                ctx.moveTo(5, 14);    // Back to foot base
-                ctx.lineTo(10, 18);   // Right toe (back)
-                ctx.stroke();
-                ctx.closePath();
-
-                ctx.restore();  // Restore the canvas state (undo rotation/translation)
-            }
-        }
-
-        // Function to update the bird's position based on physics
-        function updateBird() {
-            // Only update bird if game has started
-            if (!gameStarted) return;
-
-            // Apply gravity - makes the bird fall down
-            bird.velocity += GRAVITY;
-
-            // Limit maximum falling speed
-            if (bird.velocity > 10) {
-                bird.velocity = 10;
-            }
-            
-            // Update the bird's position based on its velocity
-            bird.y += bird.velocity;
-        }
-
-        // Function to check if the bird hit the bottom of the screen
-        function checkBottomCollision() {
-            // Only check if game has started
-            if (!gameStarted) return;
-
-            // Check if bird's bottom edge touches or goes below the canvas bottom
-            if (bird.y + bird.radius >= canvas.height) {
-                // Only lose heart if not invincible
-                if (!invincible) {
-                    hearts--;                    // Lose one heart
-                    invincible = true;           // Make bird invincible
-                    invincibleTimer = 120;       // 2 seconds of invincibility
-                    playBuzz();                  // Play buzz sound when hitting bottom
-
-                    // If no hearts left, game over!
-                    if (hearts <= 0) {
-                        endGame();
-                    }
-                }
-                
-                // Push bird back up if it goes below
-                bird.y = canvas.height - bird.radius;
-                bird.velocity = 0;  // Stop falling
-            }
-        }
-
-        // Function to draw the "Game Over" message with scores
         function drawGameOver() {
-            // Draw semi-transparent dark overlay
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-
             ctx.fillStyle = 'white';
             ctx.font = '48px Arial';
             ctx.textAlign = 'center';
             ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 100);
-            
-            // Show current score
             ctx.font = '32px Arial';
             ctx.fillText('Score: ' + score, canvas.width / 2, canvas.height / 2 - 30);
-
-            // Show high score with special effect if it's a new record
-            ctx.font = '32px Arial';
-            if (newHighScore) {
-                // Flash between gold and rainbow colors
-                const flashRate = Math.floor(flashTimer / 10) % 2;
-                ctx.fillStyle = flashRate === 0 ? '#FFD700' : getRainbowColor();  // Gold or rainbow
-            } else {
-                ctx.fillStyle = 'white';
-            }
             ctx.fillText('High Score: ' + highScore, canvas.width / 2, canvas.height / 2 + 20);
-            
-            // Restart instruction
-            ctx.fillStyle = 'white';
             ctx.font = '24px Arial';
-            ctx.fillText('Click to restart', canvas.width / 2, canvas.height / 2 + 70);
+            ctx.fillText('Tap to restart', canvas.width / 2, canvas.height / 2 + 70);
         }
 
-        // Function to reset the game to start over
+        // --- LOGIC FUNCTIONS ---
+        function calculatePillarSpeed() {
+            const speedMultiplier = 1 + (Math.floor(score / 5) * 0.1);
+            return BASE_PILLAR_SPEED * speedMultiplier;
+        }
+
+        function updatePillars() {
+            if (!gameStarted) return;
+            pillarSpeed = calculatePillarSpeed();
+            for (let i = pillars.length - 1; i >= 0; i--) {
+                pillars[i].x -= pillarSpeed;
+                if (!pillars[i].scored && pillars[i].x + PILLAR_WIDTH < bird.x) {
+                    score++;
+                    // Strike 2: Music Switch
+                    if (score === 10) {
+                        bgMusic.pause();
+                        bgMusic.currentTime = 0;
+                        fastMusic.play().catch(e => console.log("Fast music triggered"));
+                    }
+                    pillars[i].scored = true;
+                }
+                if (pillars[i].x + PILLAR_WIDTH < 0) pillars.splice(i, 1);
+            }
+            if (pillars.length === 0 || pillars[pillars.length - 1].x < canvas.width - PILLAR_SPACING) {
+                createPillar();
+            }
+        }
+
+        function checkPillarCollision() {
+            if (invincible || !gameStarted) return;
+            pillars.forEach(p => {
+                if (bird.x + bird.radius > p.x && bird.x - bird.radius < p.x + PILLAR_WIDTH) {
+                    const gapTop = p.gapY - PILLAR_GAP / 2;
+                    const gapBottom = p.gapY + PILLAR_GAP / 2;
+                    if (bird.y - bird.radius < gapTop || bird.y + bird.radius > gapBottom) {
+                        hearts--;
+                        invincible = true;
+                        invincibleTimer = 120;
+                        playBuzz();
+                        if (hearts <= 0) endGame();
+                    }
+                }
+            });
+        }
+
+        function checkBottomCollision() {
+            if (!gameStarted) return;
+            if (bird.y + bird.radius >= canvas.height) {
+                if (!invincible) {
+                    hearts--;
+                    invincible = true;
+                    invincibleTimer = 120;
+                    playBuzz();
+                    if (hearts <= 0) endGame();
+                }
+                bird.y = canvas.height - bird.radius;
+                bird.velocity = 0;
+            }
+        }
+
+        function endGame() {
+            gameOver = true;
+            gameStarted = false;
+            // Stop all music on Game Over
+            bgMusic.pause();
+            fastMusic.pause();
+            if (score > highScore) {
+                highScore = score;
+                saveHighScore(highScore);
+                newHighScore = true;
+            }
+        }
+
+        function updateBird() {
+            if (!gameStarted) return;
+            bird.velocity += GRAVITY;
+            if (bird.velocity > 10) bird.velocity = 10;
+            bird.y += bird.velocity;
+        }
+
+        function updateTrail() {
+            if (Math.floor(Date.now() / 50) % 2 === 0) {
+                trailParticles.push({ x: bird.x, y: bird.y, opacity: 0.8, size: 8 });
+            }
+            if (trailParticles.length > TRAIL_LENGTH) trailParticles.shift();
+            trailParticles.forEach((p, i) => {
+                p.opacity -= 0.15;
+                p.size -= 0.3;
+                if (p.opacity <= 0) trailParticles.splice(i, 1);
+            });
+        }
+
         function resetGame() {
-            bird.y = 200;        // Reset bird to starting position
-            bird.velocity = 0;    // Reset velocity (no movement)
-            bird.rotation = 0;    // Reset rotation
-            gameOver = false;    // Game is running again
-            gameStarted = false; // Start paused (waiting for spacebar)
-            score = 0;           // Reset score to zero
-            hearts = 5;          // Reset hearts to 5
-            invincible = false;  // Reset invincibility
-            invincibleTimer = 0; // Reset timer
-            wingFlap = 0;        // Reset wing animation
-            pillarSpeed = BASE_PILLAR_SPEED;  // Reset pillar speed
-            // Reset music to the slow Cumbia
-    fastMusic.pause();
-    fastMusic.currentTime = 0;
-    bgMusic.currentTime = 0; 
-    bgMusic.play();
-            pillars = [];        // Clear all pillars
-            trailParticles = []; // Clear trail particles
-            newHighScore = false; // Reset high score flag
-            flashTimer = 0;      // Reset flash timer
-            createClouds();      // Recreate clouds
-            createBackgroundTrees(); // Recreate background trees
+            bird.y = 200; bird.velocity = 0;
+            gameOver = false; gameStarted = false;
+            score = 0; hearts = 5;
+            invincible = false; invincibleTimer = 0;
+            pillars = []; trailParticles = [];
+            // Strike 3: Reset Music
+            fastMusic.pause();
+            fastMusic.currentTime = 0;
+            bgMusic.currentTime = 0;
+            bgMusic.play().catch(e => console.log("Audio reset"));
+            createPillar();
         }
 
-        // Listen for keyboard input - when spacebar is pressed
-        document.addEventListener('keydown', function(event) {
-            if (event.code === 'Space') {
-                event.preventDefault();  // Prevent page from scrolling
-
-                // If game hasn't started, start it
-                if (!gameStarted && !gameOver) {
-                    gameStarted = true;
-                    return;
-                }
-
-                // If game is running, make bird flap
-                if (gameStarted && !gameOver) {
-                    bird.velocity = JUMP_STRENGTH;  // Make the bird jump upward
-                    wingFlap = 1;                   // Trigger wing flap animation
-                    playBeep();                     // Play beep sound
-                }
-            }
-        });
-/// Updated Touch Listener for iOS Audio Fix
-window.addEventListener('touchstart', function(event) {
-    if (!gameStarted && !gameOver) {
-        gameStarted = true;
-        // This is the "Magic Key" for iOS - it unlocks audio on the first tap
-        bgMusic.play().catch(e => console.log("Audio waiting for interaction"));
-    } else if (gameStarted && !gameOver) {
-        bird.velocity = JUMP_STRENGTH;
-        wingFlap = 1;
-        // If you have a jump sound effect, play it here too
-    }
-    
-    if (gameOver) {
-        // This allows the tap to restart the game
-        // (Assuming your restart logic is triggered by the canvas click)
-    }
-
-    event.preventDefault(); 
-}, { passive: false });
-
-        // Listen for mouse clicks - when clicked, restart the game if it's over
-        canvas.addEventListener('click', function() {
-            if (gameOver) {
-                resetGame(); // Start a new game (paused at start)
-            }
-        });
-
-        // Main game loop - this function runs continuously to update and draw the game
-        function gameLoop() {
-            // Clear the entire canvas (erase everything from last frame)
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Draw gradient sky background first
-            drawSky();
-
-            // Update flash effect for high score
-            updateFlashEffect();
-
-            if (!gameOver) {
-                // If game is running, update physics and check collisions
-                updateClouds();          // Update cloud positions (parallax)
-                updateBackgroundTrees(); // Update background tree positions
-                updateBird();
-                updatePillars();         // Update and move pillars
-                updateInvincibility();   // Update invincibility timer
-                updateWingFlap();        // Update wing flap animation
-                updateTrail();           // Update trail particles
-                checkPillarCollision();  // Check if bird hit a pillar
-                checkBottomCollision();  // Check if bird hit the bottom
-            }
-
-            // Always draw everything (background first, then foreground)
-            drawBackgroundTrees(); // Draw background trees first (furthest layer)
-            drawClouds();          // Draw clouds in background
-            drawTrail();           // Draw trail particles behind bird
-            drawPillars();         // Draw all pillars (trees and branches)
-            drawBird();            // Draw the bird on top
-            drawHearts();          // Draw hearts in top-left
-            drawScore();           // Draw the score in top-right
-
-            // Draw start screen if game hasn't started
+        // --- INPUTS ---
+        window.addEventListener('touchstart', e => {
             if (!gameStarted && !gameOver) {
-                drawStartScreen();
+                gameStarted = true;
+                bgMusic.play();
+            } else if (gameStarted && !gameOver) {
+                bird.velocity = JUMP_STRENGTH;
+                playBeep();
+            } else if (gameOver) {
+                resetGame();
             }
+            e.preventDefault();
+        }, { passive: false });
 
-            // If game is over, show the game over message
-            if (gameOver) {
-                drawGameOver();
+        canvas.addEventListener('click', () => { if (gameOver) resetGame(); });
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawSky();
+            if (!gameOver) {
+                updateBird();
+                updatePillars();
+                updateTrail();
+                checkPillarCollision();
+                checkBottomCollision();
+                if (invincible) {
+                    invincibleTimer--;
+                    if (invincibleTimer <= 0) invincible = false;
+                }
             }
-
-            // Ask the browser to call this function again on the next frame
-            // This creates a smooth animation loop (usually 60 times per second)
+            drawBackgroundTrees();
+            drawClouds();
+            drawTrail();
+            drawPillars();
+            drawBird();
+            drawHearts();
+            drawScore();
+            if (!gameStarted && !gameOver) drawStartScreen();
+            if (gameOver) drawGameOver();
             requestAnimationFrame(gameLoop);
         }
 
-        // Initialize clouds when game starts
-        createClouds();
-
-        // Initialize background trees when game starts
         createBackgroundTrees();
-
-        // Create the first pillar when game starts
+        createClouds();
         createPillar();
-
-        // Start the game loop!
         gameLoop();
     </script>
 </body>
